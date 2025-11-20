@@ -2,7 +2,7 @@
 
 ####  <p align="center"> [Junseo Koo](https://1207koo.github.io), [Jinseo Jeong](https://www.jinseo.kr), [Gunhee Kim](https://vision.snu.ac.kr/gunhee)</p>
 
-#### <p align="center">[Paper (coming soon)]() | [arXiv (coming soon)]() | [Project Page](https://1207koo.github.io/html/gaussianblending/)</p>
+#### <p align="center">[Paper (coming soon)](https://vision.snu.ac.kr/) | [arXiv](https://arxiv.org/abs/2511.15102) | [Project Page](https://1207koo.github.io/html/gaussianblending/)</p>
 
 ## Appendix
 The recent introduction of 3D Gaussian Splatting (3DGS) has significantly advanced novel view synthesis.

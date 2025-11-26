@@ -1,0 +1,10 @@
+torch
+torchvision
+torchaudio
+tqdm
+plyfile
+trimesh
+scipy
+matplotlib
+tensorboard
+lpips

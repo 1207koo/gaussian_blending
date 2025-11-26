@@ -1,0 +1,6 @@
+*.pyc
+*.so
+.vscode
+output
+build
+data

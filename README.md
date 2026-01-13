@@ -58,14 +58,14 @@ python train.py -m output/blender_lego_mtmt -s data/nerf_synthetic_multi/lego --
 ### Mip-NeRF 360 dataset
 ```bash
 # use '-r 4' for outdoor scenes, and '-r 2' for indoor scenes
-# python train.py -m <OUTPUT_DIR> -s <DATA_DIR> --white_background --eval --sample_more_highres -r <DEFAULT_RESOLUTION> --train_res <LIST_OF_TRAIN_RESOLUTIONS>
+# python train.py -m <OUTPUT_DIR> -s <DATA_DIR> --filter3d --white_background --eval --sample_more_highres -r <DEFAULT_RESOLUTION> --train_res <LIST_OF_TRAIN_RESOLUTIONS>
 
 # Single-scale training and multi-scale testing (zoom-out setting)
-python train.py -m output/mipnerf360_bicycle_stmt1 -s data/mipnerf360/bicycle --white_background --eval -r 4 --train_res 1.0
+python train.py -m output/mipnerf360_bicycle_stmt1 -s data/mipnerf360/bicycle --filter3d --white_background --eval -r 4 --train_res 1.0
 # Single-scale training and multi-scale testing (zoom-in setting)
-python train.py -m output/mipnerf360_bicycle_stmt8 -s data/mipnerf360/bicycle --white_background --eval -r 4 --train_res 8.0
+python train.py -m output/mipnerf360_bicycle_stmt8 -s data/mipnerf360/bicycle --filter3d --white_background --eval -r 4 --train_res 8.0
 # Multi-scale training and multi-scale testing
-python train.py -m output/mipnerf360_bicycle_mtmt -s data/mipnerf360/bicycle --white_background --eval --sample_more_highres -r 4
+python train.py -m output/mipnerf360_bicycle_mtmt -s data/mipnerf360/bicycle --filter3d --white_background --eval --sample_more_highres -r 4
 ```
 
 
@@ -74,6 +74,7 @@ You can render images using a trained model with the following command:
 ```bash
 # python render.py -m <OUTPUT_DIR> -s <DATA_DIR> --white_background --eval --train_res <LIST_OF_TRAIN_RESOLUTIONS> -r <DEFAULT_RESOLUTION> --lpips --vis
 python render.py -m output/blender_lego_mtmt -s data/nerf_synthetic_multi/lego --white_background --eval --lpips --vis
+python render.py -m output/mipnerf360_bicycle_mtmt -s data/mipnerf360/bicycle --filter3d --white_background --eval --lpips --vis
 ```
 
 ## Drop-in Replacement

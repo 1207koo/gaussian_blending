@@ -9,8 +9,6 @@
 #include <memory>
 #include "cuda_rasterizer/config.h"
 #include "cuda_rasterizer/rasterizer.h"
-#include <fstream>
-#include <string>
 #include <functional>
 
 std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {

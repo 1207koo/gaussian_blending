@@ -210,9 +210,8 @@ __global__ void computeCov2DCUDA(
 
     float denom = a * c - b * b;
     float dL_da = 0, dL_db = 0, dL_dc = 0;
-    float denom2inv = 1.0f / ((denom * denom) + 0.0000001f);
 
-    if (denom2inv != 0) {
+    if (denom > 1e-12f) {
         // NOTE: we do not use the inverse of Cov2D, thus change here and use the produced gradient directly
         dL_da = dL_dcov.x;
         dL_dc = dL_dcov.z;
@@ -290,7 +289,7 @@ __device__ void computeCov3D(
     glm::vec4* dL_drots
 ) {
     // Recompute (intermediate) results for the 3D covariance computation.
-    glm::vec4 q = rot;// / glm::length(rot);
+    glm::vec4 q = rot / glm::length(rot);
     float r = q.x;
     float x = q.y;
     float y = q.z;
@@ -312,9 +311,6 @@ __device__ void computeCov3D(
     glm::mat3 M = S * R;
 
     const float* dL_dcov3D = dL_dcov3Ds + 6 * idx;
-
-    glm::vec3 dunc(dL_dcov3D[0], dL_dcov3D[3], dL_dcov3D[5]);
-    glm::vec3 ounc = 0.5f * glm::vec3(dL_dcov3D[1], dL_dcov3D[2], dL_dcov3D[4]);
 
     // Convert per-element covariance loss gradients to matrix form
     glm::mat3 dL_dSigma = glm::mat3(
@@ -349,48 +345,12 @@ __device__ void computeCov3D(
 
     // Gradients of loss w.r.t. unnormalized quaternion
     float4* dL_drot = (float4*)(dL_drots + idx);
-    *dL_drot = float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w };//dnormvdv(float4{ rot.x, rot.y, rot.z, rot.w }, float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w });
-}
-
-__device__ float3 norm2d_grad(const float2 v) {
-    float norm2 = dot(v, v);
-    float norm = sqrtf(norm2);
-    float norm3 = norm * norm2;
-    norm3 = max(norm3, 1e-6f);  // NOTE: numerical statability
-    // float4 mat = {
-    //     v.y * v.y / norm3, -v.x * v.y / norm3,
-    //     -v.x * v.y / norm3, v.x * v.x / norm3
-    // }; // Compress as a vec3
-    float3 mat = {
-        v.y * v.y / norm3,
-        -v.x * v.y / norm3,
-        v.x * v.x / norm3
-    };
-    return mat;
+    *dL_drot = dnormvdv(float4{ rot.x, rot.y, rot.z, rot.w }, float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w });
 }
 
 __device__ float3 norm2d_grad(const float2 v, const float norm) {
     float norm3 = norm * norm * norm;
-    norm3 = max(norm3, 1e-6f);
-    // float4 mat = {
-    //     v.y * v.y / norm3, -v.x * v.y / norm3,
-    //     -v.x * v.y / norm3, v.x * v.x / norm3
-    // };
-    float3 mat = {
-        v.y * v.y / norm3,
-        -v.x * v.y / norm3,
-        v.x * v.x / norm3
-    };
-    return mat;
-}
-
-__device__ float3 norm2d_grad(const float2 v, const float norm, const float norm2) {
-    float norm3 = norm * norm2;
-    norm3 = max(norm3, 1e-6f);
-    // float4 mat = {
-    //     v.y * v.y / norm3, -v.x * v.y / norm3,
-    //     -v.x * v.y / norm3, v.x * v.x / norm3
-    // };
+    norm3 = max(norm3, 1e-6f);  // NOTE: numerical stability
     float3 mat = {
         v.y * v.y / norm3,
         -v.x * v.y / norm3,
@@ -526,7 +486,7 @@ renderCUDA(
     // screen-space viewport corrdinates (-1 to 1)
     const float ddelx_dx = 0.5 * W;
     const float ddely_dy = 0.5 * H;
-
+    const float gaussian_max_radius = sqrtf(-2.0f * logf(MIN_ALPHA));
 
     // Iterate over batches until all done or range is complete
     for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE) {
@@ -568,7 +528,6 @@ renderCUDA(
 
             const float2 uv = {dot(d, nv1), dot(d, nv2)};
             const float2 uv_length = (abs(nv1.x) > abs(nv1.y)) ? T_wh : reverse(T_wh); // max 45 degree rotation
-            const float gaussian_max_radius = sqrtf(-2.0f * logf(MIN_ALPHA));
             if (uv.x + 0.5f * uv_length.x < -gaussian_max_radius * sigma1 || uv.x - 0.5f * uv_length.x > gaussian_max_radius * sigma1 || uv.y + 0.5f * uv_length.y < -gaussian_max_radius * sigma2 || uv.y - 0.5f * uv_length.y > gaussian_max_radius * sigma2)
                 continue;
 
@@ -587,11 +546,6 @@ renderCUDA(
                 const float alpha = min(0.99f, cov_o.w * exp(power));
                 if(alpha < MIN_ALPHA) continue; // clipping
                 const float weight = T_val * alpha;
-                // TODO
-                // if (T_val - weight < 0.0001f) {
-                //     done = true;
-                //     break;
-                // }
 
                 float dL_dalpha = 0.0f;
                 for(int ch = 0; ch < C; ch++)
@@ -621,7 +575,6 @@ renderCUDA(
                 atomicAdd(&dL_dmean2D[alpha_id[j]].z, length(dL_dxy));
 
                 T_val = T_val - weight;
-                // TODO
                 if (T_val < 0.0001f) {
                     done = true;
                     break;
@@ -629,22 +582,13 @@ renderCUDA(
                 continue;
             }
 
+            const float inv_area = 1.0f / (T_wh.x * T_wh.y);
             const float intU_0th = sigma1 * (gaussian_0th_moment(U2) - gaussian_0th_moment(U1));
             const float intV_0th = sigma2 * (gaussian_0th_moment(V2) - gaussian_0th_moment(V1));
-            const float average_alpha = min(0.99f, cov_o.w * intU_0th * intV_0th / T_wh.x / T_wh.y);
+            const float average_alpha = min(0.99f, cov_o.w * intU_0th * intV_0th * inv_area);
             if(average_alpha < MIN_ALPHA) continue; // clipping
 
             const float weight = T_val * average_alpha;
-
-            // Eq. (2) from 3D Gaussian splatting paper.
-            // Obtain alpha by multiplying with Gaussian opacity
-            // and its exponential falloff from mean.
-            // Avoid numerical instabilities (see paper appendix). 
-            // TODO
-            // if (T_val - weight < 0.0001f) {
-            //     done = true;
-            //     break;
-            // }
 
             float dL_dalpha = 0.0f;
             for(int ch = 0; ch < C; ch++)
@@ -655,10 +599,10 @@ renderCUDA(
                 atomicAdd(&(dL_dcolors[alpha_id[j] * C + ch]), weight * dL_dpixel[ch]);
             }
 
-            const float dL_do = dL_dalpha * intU_0th * intV_0th / T_wh.x / T_wh.y;
+            const float dL_do = dL_dalpha * intU_0th * intV_0th * inv_area;
             atomicAdd(&(dL_dopacity[alpha_id[j]]), dL_do);
-            const float dL_dU_0th = dL_dalpha * cov_o.w * intV_0th / T_wh.x / T_wh.y;
-            const float dL_dV_0th = dL_dalpha * cov_o.w * intU_0th / T_wh.x / T_wh.y;
+            const float dL_dU_0th = dL_dalpha * cov_o.w * intV_0th * inv_area;
+            const float dL_dV_0th = dL_dalpha * cov_o.w * intU_0th * inv_area;
             const float dL_dU2 = dL_dU_0th * sigma1 * gaussian_0th_moment_backward(U2);
             const float dL_dU1 = -(dL_dU_0th * sigma1 * gaussian_0th_moment_backward(U1));
             const float dL_dV2 = dL_dV_0th * sigma2 * gaussian_0th_moment_backward(V2);
@@ -678,10 +622,16 @@ renderCUDA(
             atomicAdd(&dL_dmean2D[alpha_id[j]].y, dL_dalpha_xy.y);
             atomicAdd(&dL_dmean2D[alpha_id[j]].z, length(dL_dalpha_xy));
 
-            const float3 dnv1_dv1 = norm2d_grad(v1, norm_v1);
-            const float3 dnv2_dv2 = norm2d_grad(v2, norm_v2);
-            const float2 dL_dv1 = matmul(dL_dnv1, dnv1_dv1);
-            const float2 dL_dv2 = matmul(dL_dnv2, dnv2_dv2);
+            float2 dL_dv1, dL_dv2;
+            if (norm_v1 < 1e-6f || norm_v2 < 1e-6f) {
+                dL_dv1 = {0.0f, 0.0f};
+                dL_dv2 = {0.0f, 0.0f};
+            } else {
+                const float3 dnv1_dv1 = norm2d_grad(v1, norm_v1);
+                const float3 dnv2_dv2 = norm2d_grad(v2, norm_v2);
+                dL_dv1 = matmul(dL_dnv1, dnv1_dv1);
+                dL_dv2 = matmul(dL_dnv2, dnv2_dv2);
+            }
             const float3 dL_dv_dv_dcov = {
                 -dL_dv1.y,
                 dL_dv1.x + dL_dv2.y,
@@ -714,18 +664,18 @@ renderCUDA(
             const float intU_2nd = sigma1 * sigma1 * sigma1 * (gaussian_2nd_moment(U2) - gaussian_2nd_moment(U1));
             const float intV_2nd = sigma2 * sigma2 * sigma2 * (gaussian_2nd_moment(V2) - gaussian_2nd_moment(V1));
 
+            const float T_oia = T_val * cov_o.w * inv_area;
             const float m_0 = T_val - weight;
-            const float2 m_1 = make_float2(T_val * uv.x - T_val / T_wh.x / T_wh.y * cov_o.w * intU_1st * intV_0th,
-                                          T_val * uv.y - T_val / T_wh.x / T_wh.y * cov_o.w * intU_0th * intV_1st);
-            const float2 m_2 = make_float2(T_val * (uv.x * uv.x + (uv_length.x * uv_length.x) / 12.0f) - T_val / T_wh.x / T_wh.y * cov_o.w * intU_2nd * intV_0th,
-                                          T_val * (uv.y * uv.y + (uv_length.y * uv_length.y) / 12.0f) - T_val / T_wh.x / T_wh.y * cov_o.w * intU_0th * intV_2nd);
+            const float2 m_1 = make_float2(T_val * uv.x - T_oia * intU_1st * intV_0th,
+                                          T_val * uv.y - T_oia * intU_0th * intV_1st);
+            const float2 m_2 = make_float2(T_val * (uv.x * uv.x + (uv_length.x * uv_length.x) / 12.0f) - T_oia * intU_2nd * intV_0th,
+                                          T_val * (uv.y * uv.y + (uv_length.y * uv_length.y) / 12.0f) - T_oia * intU_0th * intV_2nd);
             const float inv_m_0 = safe_inverse(m_0);
             
             T_val = m_0;
             T_xy = xy + m_1.x * inv_m_0 * nv1 + m_1.y * inv_m_0 * nv2;
             const float2 T_var = fmaxf(m_2 * inv_m_0 - m_1 * m_1 * inv_m_0 * inv_m_0, make_float2(0.001f, 0.001f));
             T_wh = (abs(nv1.x) > abs(nv1.y)) ? sqrtf(12.0f * T_var) : sqrtf(12.0f * reverse(T_var));
-            // TODO
             if (T_val < 0.0001f) {
                 done = true;
                 break;

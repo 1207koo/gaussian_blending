@@ -11,8 +11,6 @@
 
 #include "rasterizer_impl.h"
 #include <iostream>
-#include <chrono>
-#include <fstream>
 #include <algorithm>
 #include <numeric>
 #include <cuda.h>
@@ -213,7 +211,6 @@ int CudaRasterizer::Rasterizer::forward(
     int* radii,
     bool debug
 ) {
-    // auto time0 = std::chrono::high_resolution_clock::now();
     const float focal_y = height / (2.0f * tan_fovy);
     const float focal_x = width / (2.0f * tan_fovx);
 
@@ -267,17 +264,9 @@ int CudaRasterizer::Rasterizer::forward(
         prefiltered
     ), debug)
 
-    // auto time1 = std::chrono::high_resolution_clock::now();
-    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(1000.0f * (time1 - time0)).count();
-    // std::cout << "proprocess: "<< duration << " ms"<< std::endl;
-
     // Compute prefix sum over full list of touched tile counts by Gaussians
     // E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
     CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)
-
-    // auto time2 = std::chrono::high_resolution_clock::now();
-    // duration = std::chrono::duration_cast<std::chrono::milliseconds>(1000.0f * (time2 - time1)).count();
-    // std::cout << "sort1: "<< duration << " ms"<< std::endl;
 
     // Retrieve total number of Gaussian instances to launch and resize aux buffers
     int num_rendered;
@@ -286,10 +275,6 @@ int CudaRasterizer::Rasterizer::forward(
     size_t binning_chunk_size = required<BinningState>(num_rendered);
     char* binning_chunkptr = binningBuffer(binning_chunk_size);
     BinningState binningState = BinningState::fromChunk(binning_chunkptr, num_rendered);
-
-    // auto time3 = std::chrono::high_resolution_clock::now();
-    // duration = std::chrono::duration_cast<std::chrono::milliseconds>(1000.0f * (time3 - time2)).count();
-    // std::cout << "sort2: "<< duration << " ms"<< std::endl;
 
     // For each instance to be rendered, produce adequate [ tile | depth ] key 
     // and corresponding duplicated Gaussian indices to be sorted
@@ -305,10 +290,6 @@ int CudaRasterizer::Rasterizer::forward(
     CHECK_CUDA(, debug)
 
     int bit = getHigherMsb(tile_grid.x * tile_grid.y);
-
-    // auto time4 = std::chrono::high_resolution_clock::now();
-    // duration = std::chrono::duration_cast<std::chrono::milliseconds>(1000.0f * (time4 - time3)).count();
-    // std::cout << "sort3: "<< duration << " ms"<< std::endl;
 
     // Sort complete list of (duplicated) Gaussian indices by keys
     CHECK_CUDA(cub::DeviceRadixSort::SortPairs(
@@ -328,10 +309,6 @@ int CudaRasterizer::Rasterizer::forward(
             imgState.ranges);
     CHECK_CUDA(, debug)
 
-    // auto time5 = std::chrono::high_resolution_clock::now();
-    // duration = std::chrono::duration_cast<std::chrono::milliseconds>(1000.0f * (time5 - time4)).count();
-    // std::cout << "sort4: "<< duration << " ms"<< std::endl;
-
     // Let each tile blend its range of Gaussians independently in parallel
     const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
     CHECK_CUDA(FORWARD::render(
@@ -348,10 +325,6 @@ int CudaRasterizer::Rasterizer::forward(
         imgState.n_contrib,
         imgState.final_color,
         out_color), debug)
-
-    // auto time6 = std::chrono::high_resolution_clock::now();
-    // duration = std::chrono::duration_cast<std::chrono::milliseconds>(1000.0f * (time6 - time5)).count();
-    // std::cout << "render: "<< duration << " ms"<< std::endl;
 
     return num_rendered;
 }

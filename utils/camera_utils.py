@@ -15,10 +15,8 @@ import numpy as np
 import torch
 import trimesh
 from scipy import interpolate
-from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
-from tqdm import tqdm
 
 from arguments import GroupParams
 from scene.cameras import Camera
@@ -60,7 +58,7 @@ def loadCam(args: GroupParams, id: int, cam_info: CameraInfo, resolution_scale: 
     gt_image = resized_image_rgb[:3, ...]
     loaded_mask = None
 
-    if resized_image_rgb.shape[1] == 4:
+    if resized_image_rgb.shape[0] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
 
     return Camera(
@@ -281,7 +279,7 @@ def save_camera_mesh(
             # calculate the camera size automatically by the radius of camera origins
             origins = np.asarray(extrinsics[:, :3, 3])
             center = np.mean(origins, axis=0)
-            radius = np.linalg.norm((origins - center).max(0))
+            radius = np.linalg.norm(origins - center, axis=1).max()
             camera_size = radius * 0.05
         else:
             camera_size = float(camera_size)
@@ -353,9 +351,6 @@ def trajectory_from_c2ws(c2ws: List[np.ndarray], frames: int) -> List[np.ndarray
         key_times.append(key_id)
     key_rots = R.from_matrix(np.stack(rots))
     slerp = Slerp(key_times, key_rots)
-    # lerp_x = interp1d(key_times, np.array(pos_x), "cubic")
-    # lerp_y = interp1d(key_times, np.array(pos_y), "cubic")
-    # lerp_z = interp1d(key_times, np.array(pos_z), "cubic")
 
     xyz = np.vstack([pos_x, pos_y, pos_z]).T
     u = np.cumsum(np.r_[[0], np.linalg.norm(np.diff(xyz, axis=0), axis=1)])
@@ -367,10 +362,6 @@ def trajectory_from_c2ws(c2ws: List[np.ndarray], frames: int) -> List[np.ndarray
     y_inter = lerp_y(uu)
     z_inter = lerp_z(uu)
 
-    # tck, u = interpolate.splprep([pos_x, pos_y, pos_z], s=frames // 2)
-    # u_fine = np.linspace(0, 1, frames)
-    # x_inter, y_inter, z_inter = interpolate.splev(u_fine, tck)
-
     # get the times for interpolation
     times = []
     for i in range(frames):
@@ -379,9 +370,6 @@ def trajectory_from_c2ws(c2ws: List[np.ndarray], frames: int) -> List[np.ndarray
 
     # interpolation generation
     rots_inter = slerp(times).as_matrix()
-    # x_inter = lerp_x(times)
-    # y_inter = lerp_y(times)
-    # z_inter = lerp_z(times)
 
     # pose
     c2ws_inter = []

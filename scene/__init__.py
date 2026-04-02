@@ -33,7 +33,7 @@ class Scene:
         shuffle: bool = True,
         resolution_scales=[1.0, 2.0, 4.0, 8.0],
     ) -> None:
-        """b
+        """
         :param path: Path to colmap scene main folder.
         """
         self.model_path = args.model_path
@@ -108,20 +108,12 @@ class Scene:
                     self.train_cameras[resolution_scale] = []
                 print(f"Loading Test Cameras with resolution scale: {resolution_scale}")
                 self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)
-                for cam in self.train_cameras[resolution_scale]:
-                    img_name = cam.image_name
-                    if img_name.split('.')[-1].lower() in ['png', 'jpg', 'jpeg']:
-                        img_name = img_name.rsplit('.', 1)[0] + '_' + str(resolution_scale) + '.' + img_name.rsplit('.', 1)[-1]
+                for cam in self.train_cameras[resolution_scale] + self.test_cameras[resolution_scale]:
+                    name, ext = os.path.splitext(cam.image_name)
+                    if ext.lower() in ['.png', '.jpg', '.jpeg']:
+                        cam.image_name = f"{name}_{resolution_scale}{ext}"
                     else:
-                        img_name += '_' + str(resolution_scale) + '.png'
-                    cam.image_name = img_name
-                for cam in self.test_cameras[resolution_scale]:
-                    img_name = cam.image_name
-                    if img_name.split('.')[-1].lower() in ['png', 'jpg', 'jpeg']:
-                        img_name = img_name.rsplit('.', 1)[0] + '_' + str(resolution_scale) + '.' + img_name.rsplit('.', 1)[-1]
-                    else:
-                        img_name += '_' + str(resolution_scale) + '.png'
-                    cam.image_name = img_name
+                        cam.image_name = f"{cam.image_name}_{resolution_scale}.png"
 
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path, "point_cloud", "iteration_" + str(self.loaded_iter), "point_cloud.ply"))

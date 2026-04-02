@@ -139,7 +139,7 @@ __device__ void computeCov3D(
     S[2][2] = mod * scale.z;
 
     // Normalize quaternion to get valid rotation
-    glm::vec4 q = rot;// / glm::length(rot);
+    glm::vec4 q = rot / glm::length(rot);
     float r = q.x;
     float x = q.y;
     float y = q.z;
@@ -231,7 +231,7 @@ __global__ void preprocessCUDA(
     const float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
 
     const float det = determinant(cov);
-    if (det == 0.0f)
+    if (det < 1e-12f)
         return;
 
     // Compute extent in screen space (by finding eigenvalues of
@@ -243,8 +243,6 @@ __global__ void preprocessCUDA(
     const float root_sqrt = sqrtf(max(0.0f, root));
     const float lambda1 = half_trace + root_sqrt;
     const float lambda2 = half_trace - root_sqrt;
-    // const float lambda1_ = half_trace + max(0.33f, root_sqrt);
-    // const float lambda2_ = half_trace - max(0.33f, root_sqrt);
     const float lambda1_ = half_trace + sqrt(max(0.1f, root));
     const float lambda2_ = half_trace - sqrt(max(0.1f, root));
     const int my_radius = ceil(sqrtf(-2.0f * logf(MIN_ALPHA)) * sqrtf(max(0.0f, max(lambda1_, lambda2_))));
@@ -256,10 +254,14 @@ __global__ void preprocessCUDA(
 
     // https://math.stackexchange.com/questions/395698/fast-way-to-calculate-eigen-of-2x2-matrix-using-a-formula
     float2 v1 = {cov.y, lambda1 - cov.x};
-    v1 = normalize(v1);
     float2 v2 = {lambda2 - cov.z, cov.y};
-    v2 = normalize(v2);
-    // const float sigma1 = sqrtf(lambda1), sigma2 = sqrtf(abs(lambda2));
+    if (length(v1) < 1e-6f || length(v2) < 1e-6f) {
+        v1 = {1.0f, 0.0f};
+        v2 = {0.0f, 1.0f};
+    } else {
+        v1 = normalize(v1);
+        v2 = normalize(v2);
+    }
 
     // If colors have been precomputed, use them, otherwise convert
     // spherical harmonics coefficients to RGB color.
@@ -333,6 +335,7 @@ renderCUDA(
     uint32_t contributor = 0;
     uint32_t last_contributor = 0;
     float C[CHANNELS] = { 0.0f };
+    const float gaussian_max_radius = sqrtf(-2.0f * logf(MIN_ALPHA));
 
     // Iterate over batches until all done or range is complete
     for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE) {
@@ -368,7 +371,6 @@ renderCUDA(
 
             const float2 uv = {dot(d, nv1), dot(d, nv2)};
             const float2 uv_length = (abs(nv1.x) > abs(nv1.y)) ? T_wh : reverse(T_wh); // max 45 degree rotation
-            const float gaussian_max_radius = sqrtf(-2.0f * logf(MIN_ALPHA));
             if (uv.x + 0.5f * uv_length.x < -gaussian_max_radius * sigma1 || uv.x - 0.5f * uv_length.x > gaussian_max_radius * sigma1 || uv.y + 0.5f * uv_length.y < -gaussian_max_radius * sigma2 || uv.y - 0.5f * uv_length.y > gaussian_max_radius * sigma2)
                 continue;
 
@@ -387,17 +389,11 @@ renderCUDA(
                 const float alpha = min(0.99f, cov_o.w * exp(power));
                 if(alpha < MIN_ALPHA) continue; // clipping
                 const float weight = T_val * alpha;
-                // TODO
-                // if (T_val - weight < 0.0001f) {
-                //     done = true;
-                //     break;
-                // }
 
                 for (int ch = 0; ch < CHANNELS; ch++)
                     C[ch] += features[alpha_id[j] * CHANNELS + ch] * weight;
                 last_contributor = contributor;
                 T_val = T_val - weight;
-                // TODO
                 if (T_val < 0.0001f) {
                     done = true;
                     break;
@@ -405,22 +401,13 @@ renderCUDA(
                 continue;
             }
 
+            const float inv_area = 1.0f / (T_wh.x * T_wh.y);
             const float intU_0th = sigma1 * (gaussian_0th_moment(U2) - gaussian_0th_moment(U1));
             const float intV_0th = sigma2 * (gaussian_0th_moment(V2) - gaussian_0th_moment(V1));
-            const float average_alpha = min(0.99f, cov_o.w * intU_0th * intV_0th / T_wh.x / T_wh.y);
+            const float average_alpha = min(0.99f, cov_o.w * intU_0th * intV_0th * inv_area);
             if(average_alpha < MIN_ALPHA) continue; // clipping
 
             const float weight = T_val * average_alpha;
-
-            // Eq. (2) from 3D Gaussian splatting paper.
-            // Obtain alpha by multiplying with Gaussian opacity
-            // and its exponential falloff from mean.
-            // Avoid numerical instabilities (see paper appendix). 
-            // TODO
-            // if (T_val - weight < 0.0001f) {
-            //     done = true;
-            //     break;
-            // }
 
             // Eq. (3) from 3D Gaussian splatting paper.
             for (int ch = 0; ch < CHANNELS; ch++)
@@ -433,18 +420,18 @@ renderCUDA(
             const float intU_2nd = sigma1 * sigma1 * sigma1 * (gaussian_2nd_moment(U2) - gaussian_2nd_moment(U1));
             const float intV_2nd = sigma2 * sigma2 * sigma2 * (gaussian_2nd_moment(V2) - gaussian_2nd_moment(V1));
 
+            const float T_oia = T_val * cov_o.w * inv_area;
             const float m_0 = T_val - weight;
-            const float2 m_1 = make_float2(T_val * uv.x - T_val / T_wh.x / T_wh.y * cov_o.w * intU_1st * intV_0th,
-                                          T_val * uv.y - T_val / T_wh.x / T_wh.y * cov_o.w * intU_0th * intV_1st);
-            const float2 m_2 = make_float2(T_val * (uv.x * uv.x + (uv_length.x * uv_length.x) / 12.0f) - T_val / T_wh.x / T_wh.y * cov_o.w * intU_2nd * intV_0th,
-                                          T_val * (uv.y * uv.y + (uv_length.y * uv_length.y) / 12.0f) - T_val / T_wh.x / T_wh.y * cov_o.w * intU_0th * intV_2nd);
+            const float2 m_1 = make_float2(T_val * uv.x - T_oia * intU_1st * intV_0th,
+                                          T_val * uv.y - T_oia * intU_0th * intV_1st);
+            const float2 m_2 = make_float2(T_val * (uv.x * uv.x + (uv_length.x * uv_length.x) / 12.0f) - T_oia * intU_2nd * intV_0th,
+                                          T_val * (uv.y * uv.y + (uv_length.y * uv_length.y) / 12.0f) - T_oia * intU_0th * intV_2nd);
             const float inv_m_0 = safe_inverse(m_0);
             
             T_val = m_0;
             T_xy = xy + m_1.x * inv_m_0 * nv1 + m_1.y * inv_m_0 * nv2;
             const float2 T_var = fmaxf(m_2 * inv_m_0 - m_1 * m_1 * inv_m_0 * inv_m_0, make_float2(0.001f, 0.001f));
             T_wh = (abs(nv1.x) > abs(nv1.y)) ? sqrtf(12.0f * T_var) : sqrtf(12.0f * reverse(T_var));
-            // TODO
             if (T_val < 0.0001f) {
                 done = true;
                 break;

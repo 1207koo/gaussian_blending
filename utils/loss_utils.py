@@ -13,15 +13,10 @@ from math import exp
 
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable
 
 
 def l1_loss(network_output: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
     return torch.abs((network_output - gt)).mean()
-
-
-def l2_loss(network_output: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
-    return ((network_output - gt) ** 2).mean()
 
 
 def gaussian(window_size: int, sigma: float) -> torch.Tensor:
@@ -31,12 +26,14 @@ def gaussian(window_size: int, sigma: float) -> torch.Tensor:
     return gauss / gauss.sum()
 
 
-def create_window(window_size: int, channel: int) -> Variable:
+def create_window(window_size: int, channel: int) -> torch.Tensor:
     _1D_window = gaussian(window_size, 1.5).unsqueeze(1)
     _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
-    window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous())
+    window = _2D_window.expand(channel, 1, window_size, window_size).contiguous()
     return window
 
+
+_ssim_window_cache = {}
 
 def ssim(
     img1: torch.Tensor,
@@ -45,11 +42,14 @@ def ssim(
     size_average: bool = True,
 ) -> torch.Tensor:
     channel = img1.size(-3)
-    window = create_window(window_size, channel)
-
-    if img1.is_cuda:
-        window = window.cuda(img1.get_device())
-    window = window.type_as(img1)
+    key = (window_size, channel, img1.device, img1.dtype)
+    if key not in _ssim_window_cache:
+        window = create_window(window_size, channel)
+        if img1.is_cuda:
+            window = window.cuda(img1.get_device())
+        window = window.type_as(img1)
+        _ssim_window_cache[key] = window
+    window = _ssim_window_cache[key]
 
     return _ssim(img1, img2, window, window_size, channel, size_average)
 
@@ -57,7 +57,7 @@ def ssim(
 def _ssim(
     img1: torch.Tensor,
     img2: torch.Tensor,
-    window: Variable,
+    window: torch.Tensor,
     window_size: int,
     channel: int,
     size_average: bool = True,

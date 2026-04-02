@@ -165,18 +165,20 @@ class GaussianModel:
     def get_opacity(self) -> torch.Tensor:
         return self.opacity_activation(self._opacity)
 
+    def _compute_3D_filter_coef(self):
+        """Compute the coefficient for 3D filter applied to opacity."""
+        scales = self.get_scaling
+        scales_square = torch.square(scales)
+        det1 = scales_square.prod(dim=1)
+        scales_after_square = scales_square + torch.square(self.filter_3D)
+        det2 = scales_after_square.prod(dim=1)
+        coef = torch.sqrt(det1 / det2.clamp(min=1e-20))
+        return coef
+
     @property
     def get_opacity_with_3D_filter(self):
         opacity = self.opacity_activation(self._opacity)
-        # apply 3D filter
-        scales = self.get_scaling
-
-        scales_square = torch.square(scales)
-        det1 = scales_square.prod(dim=1)
-
-        scales_after_square = scales_square + torch.square(self.filter_3D)
-        det2 = scales_after_square.prod(dim=1)
-        coef = torch.sqrt(det1 / det2)
+        coef = self._compute_3D_filter_coef()
         return opacity * coef[..., None]
 
     def get_covariance(self, scaling_modifier: float = 1.0) -> torch.Tensor:
@@ -184,21 +186,19 @@ class GaussianModel:
 
     @torch.no_grad()
     def compute_3D_filter(self, cameras):
-        # print("Computing 3D filter")
         xyz = self.get_xyz
         distance = torch.ones((xyz.shape[0]), device=xyz.device) * 100000.0
         valid_points = torch.zeros((xyz.shape[0]), device=xyz.device, dtype=torch.bool)
 
+        # Pre-convert all camera R/T to GPU tensors once (avoids repeated CPU->GPU transfers)
+        Rs = torch.stack([torch.tensor(c.R, dtype=torch.float32) for c in cameras]).to(xyz.device)
+        Ts = torch.stack([torch.tensor(c.T, dtype=torch.float32) for c in cameras]).to(xyz.device)
+
         # we should use the focal length of the highest resolution camera
         focal_length = 0.0
-        for camera in cameras:
-            # transform points to camera space
-            R = torch.tensor(camera.R, device=xyz.device, dtype=torch.float32)
-            T = torch.tensor(camera.T, device=xyz.device, dtype=torch.float32)
-            # R is stored transposed due to 'glm' in CUDA code so we don't neet transopse here
-            xyz_cam = xyz @ R + T[None, :]
-
-            xyz_to_cam = torch.norm(xyz_cam, dim=1)
+        for i, camera in enumerate(cameras):
+            # R is stored transposed due to 'glm' in CUDA code so we don't need transpose here
+            xyz_cam = xyz @ Rs[i] + Ts[i][None, :]
 
             # project to screen space
             valid_depth = xyz_cam[:, 2] > 0.2
@@ -208,8 +208,6 @@ class GaussianModel:
 
             x = x / z * camera.focal_x + camera.image_width / 2.0
             y = y / z * camera.focal_y + camera.image_height / 2.0
-
-            # in_screen = torch.logical_and(torch.logical_and(x >= 0, x < camera.image_width), torch.logical_and(y >= 0, y < camera.image_height))
 
             # use similar tangent space filtering as in the paper
             in_screen = torch.logical_and(
@@ -221,7 +219,6 @@ class GaussianModel:
 
             valid = torch.logical_and(valid_depth, in_screen)
 
-            # distance[valid] = torch.min(distance[valid], xyz_to_cam[valid])
             distance[valid] = torch.min(distance[valid], z[valid])
             valid_points = torch.logical_or(valid_points, valid)
             if focal_length < camera.focal_x:
@@ -247,7 +244,7 @@ class GaussianModel:
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
-        dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
+        dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
         scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
@@ -266,7 +263,6 @@ class GaussianModel:
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.xyz_gradient_accum_abs = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.xyz_gradient_accum_abs_max = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         l = [
@@ -339,7 +335,7 @@ class GaussianModel:
 
         xyz = self._xyz.detach().cpu().numpy()
         normals = np.zeros_like(xyz)
-        sh2rgb = eval_sh(0, self.get_features.transpose(1, 2).clone().detach().cpu().numpy(), None)
+        sh2rgb = eval_sh(0, self.get_features.transpose(1, 2).detach().cpu().numpy(), None)
         rgb = ((sh2rgb + 0.5).clip(0.0, 1.0) * 255.0).astype(np.uint8)
         f_dc = (
             self._features_dc.detach()
@@ -375,6 +371,8 @@ class GaussianModel:
 
         xyz = self._xyz.detach().cpu().numpy()
         normals = np.zeros_like(xyz)
+        sh2rgb = eval_sh(0, self.get_features.transpose(1, 2).detach().cpu().numpy(), None)
+        rgb = ((sh2rgb + 0.5).clip(0.0, 1.0) * 255.0).astype(np.uint8)
         f_dc = (
             self._features_dc.detach()
             .transpose(1, 2)
@@ -401,25 +399,17 @@ class GaussianModel:
         dtype_full = [(attribute, "f4") for attribute in self.construct_list_of_attributes(exclude_filter=True)]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
+        attributes = np.concatenate((xyz, normals, rgb, f_dc, f_rest, opacities, scale, rotation), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, "vertex")
         PlyData([el]).write(path)
 
     def reset_opacity(self) -> None:
-        # reset opacity to by considering 3D filter
+        # reset opacity by considering 3D filter
         current_opacity_with_filter = self.get_opacity_with_3D_filter
         opacities_new = torch.min(current_opacity_with_filter, torch.ones_like(current_opacity_with_filter) * 0.01)
 
-        # apply 3D filter
-        scales = self.get_scaling
-
-        scales_square = torch.square(scales)
-        det1 = scales_square.prod(dim=1)
-
-        scales_after_square = scales_square + torch.square(self.filter_3D)
-        det2 = scales_after_square.prod(dim=1)
-        coef = torch.sqrt(det1 / det2)
+        coef = self._compute_3D_filter_coef()
         opacities_new = opacities_new / coef[..., None]
         opacities_new = inverse_sigmoid(opacities_new)
 
@@ -533,7 +523,6 @@ class GaussianModel:
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
         self.xyz_gradient_accum_abs = self.xyz_gradient_accum_abs[valid_points_mask]
-        self.xyz_gradient_accum_abs_max = self.xyz_gradient_accum_abs_max[valid_points_mask]
 
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
@@ -587,7 +576,6 @@ class GaussianModel:
 
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.xyz_gradient_accum_abs = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.xyz_gradient_accum_abs_max = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
@@ -695,8 +683,6 @@ class GaussianModel:
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
         self.prune_points(prune_mask)
 
-        # torch.cuda.empty_cache()
-
     def add_densification_stats(
         self,
         viewspace_point_tensor: torch.Tensor,
@@ -704,8 +690,4 @@ class GaussianModel:
     ) -> None:
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter, :2], dim=-1, keepdim=True)
         self.xyz_gradient_accum_abs[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter, 2:], dim=-1, keepdim=True)
-        self.xyz_gradient_accum_abs_max[update_filter] = torch.max(
-            self.xyz_gradient_accum_abs_max[update_filter],
-            torch.norm(viewspace_point_tensor.grad[update_filter, 2:], dim=-1, keepdim=True),
-        )
         self.denom[update_filter] += 1

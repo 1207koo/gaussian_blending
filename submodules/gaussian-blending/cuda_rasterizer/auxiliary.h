@@ -23,7 +23,6 @@
 #define MIN_UV_DIFF (0.1f)
 #define MAX_UV_DIFF (1000000.0f) // (10.0f)
 
-__device__ const float HALF_INV_SQRT2 = 0.35355339059327373f;
 #ifndef M_SQRT_PI_2
 #define M_SQRT_PI_2 1.25331413731550025120788264240552f
 #endif
@@ -109,14 +108,6 @@ __forceinline__ __device__ float3 transformVec4x3Transpose(const float3& p, cons
     return transformed;
 }
 
-__forceinline__ __device__ float dnormvdz(float3 v, float3 dv)
-{
-    float sum2 = v.x * v.x + v.y * v.y + v.z * v.z;
-    float invsum32 = 1.0f / sqrt(sum2 * sum2 * sum2);
-    float dnormvdz = (-v.x * v.z * dv.x - v.y * v.z * dv.y + (sum2 - v.z * v.z) * dv.z) * invsum32;
-    return dnormvdz;
-}
-
 __forceinline__ __device__ float3 dnormvdv(float3 v, float3 dv)
 {
     float sum2 = v.x * v.x + v.y * v.y + v.z * v.z;
@@ -144,11 +135,6 @@ __forceinline__ __device__ float4 dnormvdv(float4 v, float4 dv)
     return dnormvdv;
 }
 
-__forceinline__ __device__ float sigmoid(float x)
-{
-    return 1.0f / (1.0f + expf(-x));
-}
-
 __forceinline__ __device__ bool in_frustum(
     const int idx,
     const float* orig_points,
@@ -159,13 +145,9 @@ __forceinline__ __device__ bool in_frustum(
 {
     float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 
-    // Bring points to screen space
-    // float4 p_hom = transformPoint4x4(p_orig, projmatrix);
-    // float p_w = 1.0f / (p_hom.w + 0.0000001f);
-    // float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
     p_view = transformPoint4x3(p_orig, viewmatrix);
 
-    if (p_view.z <= ZNEAR)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
+    if (p_view.z <= ZNEAR)
     {
         if (prefiltered)
         {

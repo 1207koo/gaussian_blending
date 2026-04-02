@@ -11,7 +11,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
@@ -89,11 +88,6 @@ def readColmapCameras(
 
     print("Reading camera")
     for idx, key in enumerate(cam_extrinsics):
-        # sys.stdout.write("\r")
-        # # the exact output you're looking for:
-        # sys.stdout.write("Reading camera {}/{}".format(idx + 1, len(cam_extrinsics)))
-        # sys.stdout.flush()
-
         extr = cam_extrinsics[key]
         intr = cam_intrinsics[extr.camera_id]
         height = intr.height
@@ -135,7 +129,6 @@ def readColmapCameras(
             res=1.0,
         )
         cam_infos.append(cam_info)
-    # sys.stdout.write("\n")
     return cam_infos
 
 
@@ -180,19 +173,19 @@ def readColmapSceneInfo(path: str, images: str, eval: bool, llffhold: int = 8) -
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
         cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
-    except:
+    except Exception:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.txt")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
-    reading_dir = "images" if images == None else images
+    reading_dir = "images" if images is None else images
     cam_infos_unsorted = readColmapCameras(
         cam_extrinsics=cam_extrinsics,
         cam_intrinsics=cam_intrinsics,
         images_folder=os.path.join(path, reading_dir),
     )
-    cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
+    cam_infos = sorted(cam_infos_unsorted, key=lambda x: x.image_name)
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
@@ -210,12 +203,12 @@ def readColmapSceneInfo(path: str, images: str, eval: bool, llffhold: int = 8) -
         print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
         try:
             xyz, rgb, _ = read_points3D_binary(bin_path)
-        except:
+        except Exception:
             xyz, rgb, _ = read_points3D_text(txt_path)
         storePly(ply_path, xyz, rgb)
     try:
         pcd = fetchPly(ply_path)
-    except:
+    except Exception:
         pcd = None
 
     scene_info = SceneInfo(
@@ -265,7 +258,7 @@ def readCamerasFromTransforms(
 
         norm_data = im_data / 255.0
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-        image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+        image = Image.fromarray(np.array(arr * 255.0, dtype=np.uint8), "RGB")
 
         fovy = focal2fov(fov2focal(fovx, image.size[0]), image.size[1])
         FovY = fovy
@@ -322,7 +315,7 @@ def readNerfSyntheticInfo(
         storePly(ply_path, xyz, SH2RGB(shs) * 255)
     try:
         pcd = fetchPly(ply_path)
-    except:
+    except Exception:
         pcd = None
 
     scene_info = SceneInfo(
@@ -364,7 +357,7 @@ def readMultiScale(
         image_name = Path(image_path).stem
 
         # NeRF 'transform_matrix' is a camera-to-world transform
-        c2w = meta["cam2world"][idx]
+        c2w = np.array(meta["cam2world"][idx])  # copy to avoid in-place mutation of original
         # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
         c2w[:3, 1:3] *= -1
 
@@ -381,7 +374,7 @@ def readMultiScale(
 
         norm_data = im_data / 255.0
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-        image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+        image = Image.fromarray(np.array(arr * 255.0, dtype=np.uint8), "RGB")
 
         fovx = focal2fov(meta["focal"][idx], image.size[0])
         fovy = focal2fov(meta["focal"][idx], image.size[1])
@@ -440,7 +433,7 @@ def readMultiScaleNerfSyntheticInfo(
         storePly(ply_path, xyz, SH2RGB(shs) * 255)
     try:
         pcd = fetchPly(ply_path)
-    except:
+    except Exception:
         pcd = None
 
     scene_info = SceneInfo(

@@ -12,7 +12,7 @@
 import os
 import time
 from argparse import ArgumentParser
-from typing import Dict, List, Tuple
+from typing import List
 
 import torch
 import torchvision
@@ -27,7 +27,7 @@ from utils.image_utils import psnr as get_psnr
 from utils.loss_utils import ssim as get_ssim
 
 
-lpips_fn = LPIPS(net="vgg").eval().cuda()
+lpips_fn = None
 
 def render_set(
     model_path: str,
@@ -47,6 +47,10 @@ def render_set(
     os.makedirs(render_path, exist_ok=True)
     os.makedirs(gts_path, exist_ok=True)
 
+    if len(views) == 0:
+        print(f"No views for {name}, skipping.")
+        return
+
     psnr_avg = 0.0
     ssim_avg = 0.0
     lpips_avg = 0.0
@@ -60,12 +64,15 @@ def render_set(
         psnr_avg += get_psnr(gt, rendering).mean().double()
         ssim_avg += get_ssim(gt, rendering).mean().double()
         if lpips:
+            global lpips_fn
+            if lpips_fn is None:
+                lpips_fn = LPIPS(net="vgg").eval().cuda()
             lpips_avg += lpips_fn(gt, rendering, normalize=True).mean().item()
 
-    psnr = psnr_avg / len(views)
-    ssim = ssim_avg / len(views)
-    lpips = lpips_avg / len(views)
-    content = f"psnr_avg: {psnr:.4f}; ssim_avg: {ssim:.4f}; lpips_avg: {lpips:.5f}; time_avg: {(time.time() - start) / len(views):.4f}"
+    psnr_val = psnr_avg / len(views)
+    ssim_val = ssim_avg / len(views)
+    lpips_val = lpips_avg / len(views)
+    content = f"psnr_avg: {psnr_val:.4f}; ssim_avg: {ssim_val:.4f}; lpips_avg: {lpips_val:.5f}; time_avg: {(time.time() - start) / len(views):.4f}"
     print(content)
 
     with open(os.path.join(model_path, name, f"ours_{iteration}", "results.txt"), "w") as fp:
@@ -86,7 +93,6 @@ def launch(
     gaussians = GaussianModel(sh_degree=dataset.sh_degree)
     scales = [1.0, 2.0, 4.0, 8.0]
     scene = Scene(args=dataset, load_iteration=iteration, gaussians=gaussians, shuffle=False, resolution_scales=scales)
-    # gaussians.restore(model_params)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")

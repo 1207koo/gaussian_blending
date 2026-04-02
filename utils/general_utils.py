@@ -18,6 +18,7 @@ from PIL import Image
 
 
 def inverse_sigmoid(x: torch.Tensor) -> torch.Tensor:
+    x = x.clamp(1e-5, 1 - 1e-5)
     return torch.log(x / (1 - x))
 
 
@@ -87,7 +88,7 @@ def strip_symmetric(sym: torch.Tensor) -> torch.Tensor:
 
 
 def build_rotation(r: torch.Tensor) -> torch.Tensor:
-    norm = torch.sqrt(r[:, 0] * r[:, 0] + r[:, 1] * r[:, 1] + r[:, 2] * r[:, 2] + r[:, 3] * r[:, 3])
+    norm = torch.sqrt(r[:, 0] * r[:, 0] + r[:, 1] * r[:, 1] + r[:, 2] * r[:, 2] + r[:, 3] * r[:, 3]).clamp(min=1e-8)
 
     q = r / norm[:, None]
 
@@ -123,23 +124,6 @@ def build_scaling_rotation(s: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
 
 
 def safe_state(silent: bool, seed: int = 0) -> None:
-    # old_f = sys.stdout
-    # class F:
-    #     def __init__(self, silent):
-    #         self.silent = silent
-
-    #     def write(self, x):
-    #         if not self.silent:
-    #             if x.endswith("\n"):
-    #                 old_f.write(x.replace("\n", " [{}]\n".format(str(datetime.now().strftime("%d/%m %H:%M:%S")))))
-    #             else:
-    #                 old_f.write(x)
-
-    #     def flush(self):
-    #         old_f.flush()
-
-    # sys.stdout = F(silent)
-
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

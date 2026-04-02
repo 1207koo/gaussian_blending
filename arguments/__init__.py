@@ -121,6 +121,6 @@ def get_combined_args(parser: ArgumentParser) -> Namespace:
 
     merged_dict = vars(args_cfgfile).copy()
     for k, v in vars(args_cmdline).items():
-        if v != None:
+        if v is not None:
             merged_dict[k] = v
     return Namespace(**merged_dict)

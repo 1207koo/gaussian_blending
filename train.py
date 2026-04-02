@@ -18,7 +18,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torchvision
-import torchvision.transforms as T
 from tqdm import tqdm
 
 from arguments import GroupParams, ModelParams, OptimizationParams, PipelineParams
@@ -72,8 +71,10 @@ def training(
         trainCameras += scene.getTrainCameras(scale).copy()
         testCameras += scene.getTestCameras(scale).copy()
 
-    # highresolution index
+    # highresolution index: indices into trainCameras for scale=1.0 cameras
+    # trainCameras is built by concatenating scales in order, so scale=1.0 cameras are at the front
     highresolution_index = list(range(len(scene.getTrainCameras(1.0))))
+    assert scales[0] == 1.0, "scales[0] must be 1.0 for highresolution_index to be correct"
 
     gaussians.compute_3D_filter(cameras=trainCameras)
 

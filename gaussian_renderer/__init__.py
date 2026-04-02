@@ -40,7 +40,7 @@ def render(
     screenspace_points = (torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0)
     try:
         screenspace_points.retain_grad()
-    except:
+    except Exception:
         pass
 
     # Set up rasterization configuration

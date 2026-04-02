@@ -18,6 +18,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torchvision
+from utils.selective_adam import selective_adam_step
 from tqdm import tqdm
 
 from arguments import GroupParams, ModelParams, OptimizationParams, PipelineParams
@@ -42,6 +43,7 @@ def training(
     saving_iterations: List[int],
     checkpoint_path: Optional[str] = None,
     filter3d: bool = False,
+    selective_adam: bool = False,
     dense: bool = False,
     debug_from: int = -1,
 ) -> None:
@@ -169,7 +171,10 @@ def training(
 
             # Optimizer step
             if iteration < opt.iterations:
-                gaussians.optimizer.step()
+                if selective_adam:
+                    selective_adam_step(gaussians.optimizer, visibility_filter)
+                else:
+                    gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none=True)
 
             if iteration in saving_iterations:
@@ -298,6 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--filter3d", action="store_true")
+    parser.add_argument("--selective_adam", action="store_true")
     parser.add_argument("--dense", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default=None)
     args = parser.parse_args(sys.argv[1:])
@@ -318,6 +324,7 @@ if __name__ == "__main__":
         saving_iterations=args.save_iterations,
         checkpoint_path=args.start_checkpoint,
         filter3d=args.filter3d,
+        selective_adam=args.selective_adam,
         dense=args.dense,
         debug_from=args.debug_from,
     )

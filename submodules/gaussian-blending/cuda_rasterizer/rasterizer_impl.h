@@ -3,7 +3,7 @@
  * GRAPHDECO research group, https://team.inria.fr/graphdeco
  * All rights reserved.
  *
- * This software is free for non-commercial, research and evaluation use 
+ * This software is free for non-commercial, research and evaluation use
  * under the terms of the LICENSE.md file.
  *
  * For inquiries contact  george.drettakis@inria.fr
@@ -28,9 +28,7 @@ namespace CudaRasterizer
 
 	struct GeometryState
 	{
-		size_t scan_size;
 		float* depths;
-		char* scanning_space;
 		bool* clamped;
 		int* internal_radii;
 		float3* means2D;
@@ -39,8 +37,6 @@ namespace CudaRasterizer
         float2* lambdas;
         float4* nv1_nv2;
 		float* rgb;
-		uint32_t* point_offsets;
-		uint32_t* tiles_touched;
 
 		static GeometryState fromChunk(char*& chunk, size_t P);
 	};
@@ -50,27 +46,43 @@ namespace CudaRasterizer
         uint32_t* n_contrib;
         float* final_color;
 		uint2* ranges;
+		// Per-tile binning support
+		uint32_t* tile_counts;
+		uint32_t* tile_offsets;       // inclusive prefix sum of tile_counts
+		uint32_t* tile_scatter_cnt;   // atomic counters for scatter phase
+		size_t tile_scan_size;
+		char* tile_scanning_space;
 
-		static ImageState fromChunk(char*& chunk, size_t N);
+		static ImageState fromChunk(char*& chunk, size_t N, size_t num_tiles);
 	};
 
 	struct BinningState
 	{
 		size_t sorting_size;
-		uint64_t* point_list_keys_unsorted;
-		uint64_t* point_list_keys;
-		uint32_t* point_list_unsorted;
-		uint32_t* point_list;
-		char* list_sorting_space;
+		uint32_t* point_list;          // final sorted gaussian IDs
+		uint32_t* point_list_unsorted; // scatter target (gaussian IDs)
+		float* depth_keys_unsorted;    // scatter target (depths)
+		float* depth_keys_sorted;      // sorted depths (temp)
+		char* list_sorting_space;      // CUB segmented sort scratch
 
-		static BinningState fromChunk(char*& chunk, size_t P);
+		static BinningState fromChunk(char*& chunk, size_t P, size_t num_tiles);
 	};
 
-	template<typename T> 
+	// required<T> overloads
+	template<typename T>
 	size_t required(size_t P)
 	{
 		char* size = nullptr;
 		T::fromChunk(size, P);
+		return ((size_t)size) + 128;
+	}
+
+	// Overloads for types needing two size parameters
+	template<typename T>
+	size_t required(size_t P, size_t num_tiles)
+	{
+		char* size = nullptr;
+		T::fromChunk(size, P, num_tiles);
 		return ((size_t)size) + 128;
 	}
 };

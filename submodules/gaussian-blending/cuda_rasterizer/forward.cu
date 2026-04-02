@@ -194,7 +194,6 @@ __global__ void preprocessCUDA(
     float4* __restrict__ cov_opacity,
     float2* __restrict__ lambdas,
     float4* __restrict__ nv1_nv2,
-    uint32_t* __restrict__ tiles_touched,
     bool prefiltered
 ) {
     auto idx = cg::this_grid().thread_rank();
@@ -204,7 +203,6 @@ __global__ void preprocessCUDA(
     // Initialize radius and touched tiles to 0. If this isn't changed,
     // this Gaussian will not be processed further.
     radii[idx] = 0;
-    tiles_touched[idx] = 0;
 
     // Perform near culling, quit if outside.
     float3 p_view;
@@ -245,12 +243,18 @@ __global__ void preprocessCUDA(
     const float lambda2 = half_trace - root_sqrt;
     const float lambda1_ = half_trace + sqrt(max(0.1f, root));
     const float lambda2_ = half_trace - sqrt(max(0.1f, root));
-    const int my_radius = ceil(sqrtf(-2.0f * logf(MIN_ALPHA)) * sqrtf(max(0.0f, max(lambda1_, lambda2_))));
     const float3 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H), root_sqrt};
+
+    // Tight AABB from covariance diagonal (+0.5 margin for integral-based alpha)
     uint2 rect_min, rect_max;
-    getRect(point_image, my_radius, rect_min, rect_max, grid);
+    getRectTight(point_image, cov.x, cov.z, rect_min, rect_max, grid);
     if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
         return;
+
+    // Scalar radius for Python visibility filtering (radii > 0)
+    const int my_radius = max(
+        (int)ceilf(sqrtf(-2.0f * logf(MIN_ALPHA)) * sqrtf(max(0.1f, cov.x)) + 0.5f),
+        (int)ceilf(sqrtf(-2.0f * logf(MIN_ALPHA)) * sqrtf(max(0.1f, cov.z)) + 0.5f));
 
     // https://math.stackexchange.com/questions/395698/fast-way-to-calculate-eigen-of-2x2-matrix-using-a-formula
     float2 v1 = {cov.y, lambda1 - cov.x};
@@ -280,7 +284,6 @@ __global__ void preprocessCUDA(
     cov_opacity[idx] = { cov.x, cov.y, cov.z, opacities[idx] };
     lambdas[idx] = {lambda1, lambda2};
     nv1_nv2[idx] = {v1.x, v1.y, v2.x, v2.y};
-    tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -507,7 +510,6 @@ void FORWARD::preprocess(
     float4* cov_opacity,
     float2* lambdas,
     float4* nv1_nv2,
-    uint32_t* tiles_touched,
     bool prefiltered
 ) {
     preprocessCUDA<NUM_CHANNELS><<<(P + 255) / 256, 256>>>(
@@ -536,7 +538,6 @@ void FORWARD::preprocess(
         cov_opacity,
         lambdas,
         nv1_nv2,
-        tiles_touched,
         prefiltered
     );
 }

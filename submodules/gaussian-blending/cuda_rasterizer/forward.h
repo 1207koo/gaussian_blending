@@ -47,7 +47,6 @@ namespace FORWARD
         float4* cov_opacity,
         float2* lambdas,
         float4* nv1_nv2,
-        uint32_t* tiles_touched,
         bool prefiltered
     );
 

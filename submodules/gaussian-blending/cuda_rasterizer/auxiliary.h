@@ -67,6 +67,25 @@ __forceinline__ __device__ void getRect(const float3 p, int max_radius, uint2& r
     };
 }
 
+// Tight axis-aligned bounding box from 2D covariance diagonal.
+// For a 2D Gaussian with covariance [Σ_xx, Σ_xy; Σ_xy, Σ_yy],
+// the AABB half-extents are: factor * sqrt(Σ_xx), factor * sqrt(Σ_yy).
+// +0.5 margin accounts for integral-based alpha (pixel rectangle overlap).
+__forceinline__ __device__ void getRectTight(const float3 p, float cov_xx, float cov_yy, uint2& rect_min, uint2& rect_max, dim3 grid)
+{
+    const float factor = sqrtf(-2.0f * logf(MIN_ALPHA));
+    const int radius_x = (int)ceilf(factor * sqrtf(max(0.1f, cov_xx)) + 0.5f);
+    const int radius_y = (int)ceilf(factor * sqrtf(max(0.1f, cov_yy)) + 0.5f);
+    rect_min = {
+        min(grid.x, max((int)0, (int)((p.x - radius_x) / BLOCK_X))),
+        min(grid.y, max((int)0, (int)((p.y - radius_y) / BLOCK_Y)))
+    };
+    rect_max = {
+        min(grid.x, max((int)0, (int)((p.x + radius_x + BLOCK_X - 1) / BLOCK_X))),
+        min(grid.y, max((int)0, (int)((p.y + radius_y + BLOCK_Y - 1) / BLOCK_Y)))
+    };
+}
+
 __forceinline__ __device__ float3 transformPoint4x3(const float3& p, const float* matrix)
 {
     float3 transformed = {

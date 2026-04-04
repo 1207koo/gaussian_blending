@@ -34,8 +34,8 @@ namespace CudaRasterizer
 		float3* means2D;
 		float* cov3D;
 		float4* cov_opacity;
-        float2* lambdas;
-        float4* nv1_nv2;
+		float2* lambdas;
+		float4* nv1_nv2;
 		float* rgb;
 
 		static GeometryState fromChunk(char*& chunk, size_t P);
@@ -43,13 +43,13 @@ namespace CudaRasterizer
 
 	struct ImageState
 	{
-        uint32_t* n_contrib;
-        float* final_color;
+		uint32_t* n_contrib;
+		float* final_color;
 		uint2* ranges;
-		// Per-tile binning support
+		// Per-tile binning
 		uint32_t* tile_counts;
-		uint32_t* tile_offsets;       // inclusive prefix sum of tile_counts
-		uint32_t* tile_scatter_cnt;   // atomic counters for scatter phase
+		uint32_t* tile_offsets;       // inclusive prefix sum
+		uint32_t* tile_scatter_cnt;   // atomic counters for scatter
 		size_t tile_scan_size;
 		char* tile_scanning_space;
 
@@ -68,7 +68,6 @@ namespace CudaRasterizer
 		static BinningState fromChunk(char*& chunk, size_t P, size_t num_tiles);
 	};
 
-	// required<T> overloads
 	template<typename T>
 	size_t required(size_t P)
 	{
@@ -77,7 +76,6 @@ namespace CudaRasterizer
 		return ((size_t)size) + 128;
 	}
 
-	// Overloads for types needing two size parameters
 	template<typename T>
 	size_t required(size_t P, size_t num_tiles)
 	{

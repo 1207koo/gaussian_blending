@@ -251,10 +251,8 @@ __global__ void preprocessCUDA(
     if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
         return;
 
-    // Scalar radius for Python visibility filtering (radii > 0)
-    const int my_radius = max(
-        (int)ceilf(sqrtf(-2.0f * logf(MIN_ALPHA)) * sqrtf(max(0.1f, cov.x)) + 0.5f),
-        (int)ceilf(sqrtf(-2.0f * logf(MIN_ALPHA)) * sqrtf(max(0.1f, cov.z)) + 0.5f));
+    // Scalar radius identical to original (used by Python for densification/max_radii2D)
+    const int my_radius = ceil(sqrtf(-2.0f * logf(MIN_ALPHA)) * sqrtf(max(0.0f, max(lambda1_, lambda2_))));
 
     // https://math.stackexchange.com/questions/395698/fast-way-to-calculate-eigen-of-2x2-matrix-using-a-formula
     float2 v1 = {cov.y, lambda1 - cov.x};

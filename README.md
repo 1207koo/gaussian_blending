@@ -91,6 +91,17 @@ from gaussian_blending import GaussianRasterizationSettings, GaussianRasterizer
 4. And it's done! You can now use Gaussian Blending in your existing 3DGS-based model.
 
 
+## Changelog
+
+### 2026-04-05 — CUDA Rasterizer Optimization
+- Optimized the CUDA rasterizer for faster training and rendering while maintaining equivalent quality (PSNR within ±0.1 dB).
+- Faster training across all configurations (multi-scale and single-scale).
+- Up to **190 FPS** rendering at 800×800 on a 48GB NVIDIA A40 GPU (lego, 283K Gaussians).
+
+### 2025-11-26 — Initial Code Release
+- Code release accompanying the arXiv preprint ([2511.15102](https://arxiv.org/abs/2511.15102)).
+
+
 ## Acknowledgment
 Our code is built upon the following repositories:
 - [3DGS](https://github.com/graphdeco-inria/gaussian-splatting)

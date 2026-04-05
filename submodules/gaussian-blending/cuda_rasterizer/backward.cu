@@ -583,8 +583,19 @@ renderCUDA(
             }
 
             const float inv_area = 1.0f / (T_wh.x * T_wh.y);
-            const float intU_0th = sigma1 * (gaussian_0th_moment(U2) - gaussian_0th_moment(U1));
-            const float intV_0th = sigma2 * (gaussian_0th_moment(V2) - gaussian_0th_moment(V1));
+
+            // Precompute erff and expf — reuse across 0th/1st/2nd moments and backward
+            const float erf_U2 = erff(U2 * (float)M_INV_SQRT_2);
+            const float erf_U1 = erff(U1 * (float)M_INV_SQRT_2);
+            const float erf_V2 = erff(V2 * (float)M_INV_SQRT_2);
+            const float erf_V1 = erff(V1 * (float)M_INV_SQRT_2);
+            const float exp_U2 = __expf(-0.5f * U2 * U2);
+            const float exp_U1 = __expf(-0.5f * U1 * U1);
+            const float exp_V2 = __expf(-0.5f * V2 * V2);
+            const float exp_V1 = __expf(-0.5f * V1 * V1);
+
+            const float intU_0th = sigma1 * (float)M_SQRT_PI_2 * (erf_U2 - erf_U1);
+            const float intV_0th = sigma2 * (float)M_SQRT_PI_2 * (erf_V2 - erf_V1);
             const float average_alpha = min(0.99f, cov_o.w * intU_0th * intV_0th * inv_area);
             if(average_alpha < MIN_ALPHA) continue; // clipping
 
@@ -603,10 +614,11 @@ renderCUDA(
             atomicAdd(&(dL_dopacity[alpha_id[j]]), dL_do);
             const float dL_dU_0th = dL_dalpha * cov_o.w * intV_0th * inv_area;
             const float dL_dV_0th = dL_dalpha * cov_o.w * intU_0th * inv_area;
-            const float dL_dU2 = dL_dU_0th * sigma1 * gaussian_0th_moment_backward(U2);
-            const float dL_dU1 = -(dL_dU_0th * sigma1 * gaussian_0th_moment_backward(U1));
-            const float dL_dV2 = dL_dV_0th * sigma2 * gaussian_0th_moment_backward(V2);
-            const float dL_dV1 = -(dL_dV_0th * sigma2 * gaussian_0th_moment_backward(V1));
+            // gaussian_0th_moment_backward(x) = expf(-0.5*x*x) → reuse exp_*
+            const float dL_dU2 = dL_dU_0th * sigma1 * exp_U2;
+            const float dL_dU1 = -(dL_dU_0th * sigma1 * exp_U1);
+            const float dL_dV2 = dL_dV_0th * sigma2 * exp_V2;
+            const float dL_dV1 = -(dL_dV_0th * sigma2 * exp_V1);
 
             const float dL_du = (dL_dU2 + dL_dU1) * inv_sigma1;
             const float dL_dv = (dL_dV2 + dL_dV1) * inv_sigma2;
@@ -658,11 +670,11 @@ renderCUDA(
             atomicAdd(&dL_dcov2D[alpha_id[j]].w, dL_dcov.z);
 
 
-            // update T
-            const float intU_1st = sigma1 * sigma1 * (gaussian_1st_moment(U2) - gaussian_1st_moment(U1));
-            const float intV_1st = sigma2 * sigma2 * (gaussian_1st_moment(V2) - gaussian_1st_moment(V1));
-            const float intU_2nd = sigma1 * sigma1 * sigma1 * (gaussian_2nd_moment(U2) - gaussian_2nd_moment(U1));
-            const float intV_2nd = sigma2 * sigma2 * sigma2 * (gaussian_2nd_moment(V2) - gaussian_2nd_moment(V1));
+            // update T — reuse precomputed erff/expf
+            const float intU_1st = sigma1 * sigma1 * (exp_U1 - exp_U2);
+            const float intV_1st = sigma2 * sigma2 * (exp_V1 - exp_V2);
+            const float intU_2nd = sigma1 * sigma1 * sigma1 * ((float)M_SQRT_PI_2 * (erf_U2 - erf_U1) - exp_U2 * U2 + exp_U1 * U1);
+            const float intV_2nd = sigma2 * sigma2 * sigma2 * ((float)M_SQRT_PI_2 * (erf_V2 - erf_V1) - exp_V2 * V2 + exp_V1 * V1);
 
             const float T_oia = T_val * cov_o.w * inv_area;
             const float m_0 = T_val - weight;
